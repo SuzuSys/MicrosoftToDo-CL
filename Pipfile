@@ -7,8 +7,10 @@ name = "pypi"
 msal = "*"
 pyyaml = "*"
 python-dotenv = "*"
+pydantic = "*"
 
 [dev-packages]
+black = "*"
 
 [requires]
 python_version = "3.12"
