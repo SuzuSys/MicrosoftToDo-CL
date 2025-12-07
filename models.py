@@ -1,7 +1,12 @@
 from typing import List, Optional
+
 from pydantic import BaseModel, field_validator, ConfigDict
 import yaml
+
 import formatter
+
+
+# ------------------------ Graph 本体モデル ------------------------
 
 
 class TodoBody(BaseModel):
@@ -10,9 +15,38 @@ class TodoBody(BaseModel):
 
 
 class DueDateTime(BaseModel):
-    # ここは Graph API 仕様に合わせて「文字列 ISO8601」にしておくと楽
+    # Graph API 仕様に合わせて ISO8601 文字列
     dateTime: str
     timeZone: str = "Asia/Tokyo"
+
+
+# ---- Recurrence 関連（patternedRecurrence） ----
+# 参考: https://learn.microsoft.com/graph/ などの recurrence の仕様 :contentReference[oaicite:0]{index=0}
+
+
+class RecurrencePattern(BaseModel):
+    # daily / weekly / absoluteMonthly / relativeMonthly / absoluteYearly / relativeYearly
+    type: str
+    interval: int = 1
+    month: int = 0
+    dayOfMonth: int = 0
+    daysOfWeek: List[str] = []
+    firstDayOfWeek: str = "sunday"
+    index: str = "first"
+
+
+class RecurrenceRange(BaseModel):
+    # noEnd / endDate / numbered
+    type: str
+    startDate: str
+    endDate: str = "0001-01-01"
+    recurrenceTimeZone: str = "Asia/Tokyo"
+    numberOfOccurrences: int = 0
+
+
+class Recurrence(BaseModel):
+    pattern: RecurrencePattern
+    range: RecurrenceRange
 
 
 class TodoTask(BaseModel):
@@ -21,6 +55,7 @@ class TodoTask(BaseModel):
     status: str
     dueDateTime: Optional[DueDateTime] = None
     body: Optional[TodoBody] = None
+    recurrence: Optional[Recurrence] = None  # ← ここで Graph の recurrence も保持
 
 
 class TodoTaskListResponse(BaseModel):
@@ -66,7 +101,7 @@ class NoteSubtask(BaseModel):
 
     name: str
     推定時間: QuotedStr
-    備考: Optional[str] = None  # ← 追加（サブタスクごとの備考）
+    備考: Optional[str] = None  # サブタスクごとの備考
 
     @field_validator("推定時間", mode="before")
     @classmethod
@@ -103,6 +138,9 @@ class Note(BaseModel):
         return QuotedStr(str(v))
 
 
+# ------------------------ Export 用モデル ------------------------
+
+
 class ExportSubtask(BaseModel):
     title: str
     done: bool
@@ -113,6 +151,7 @@ class ExportTask(BaseModel):
     due: Optional[str]  # "2025-12-07" など
     note: Optional[Note | str] = None
     subtasks: List[ExportSubtask]
+    recurrence: Optional[Recurrence] = None  # ← ここで YAML にも recurrence を載せる
 
 
 class ExportData(BaseModel):
