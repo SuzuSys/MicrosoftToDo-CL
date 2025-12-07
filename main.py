@@ -1,5 +1,7 @@
 import datetime
 import yaml
+import subprocess
+import sys
 
 from client import Client
 from formatter import parse_time_to_minutes, format_minutes
@@ -10,9 +12,6 @@ from models import (
     ExportSubtask,
     ExportTask,
     ExportData,
-    Recurrence,
-    RecurrencePattern,
-    RecurrenceRange,
 )
 
 
@@ -25,6 +24,40 @@ def input_yn(prompt: str, default_no: bool = True) -> bool:
     if not s:
         return not default_no
     return s.startswith("y")
+
+
+def copy_to_clipboard(text: str) -> None:
+    """
+    与えられたテキストをクリップボードにコピーする。
+    Windows では clip コマンド、それ以外ではできる範囲で頑張る。
+    """
+    try:
+        if sys.platform.startswith("win"):
+            # Windows: 標準の clip コマンドにパイプで渡す
+            subprocess.run(
+                ["clip"],
+                input=text.encode("utf-16"),
+                check=True,
+            )
+        elif sys.platform == "darwin":
+            # macOS: pbcopy
+            subprocess.run(
+                ["pbcopy"],
+                input=text,
+                text=True,
+                check=True,
+            )
+        else:
+            # Linux 系: xclip が入っていれば使う
+            subprocess.run(
+                ["xclip", "-selection", "clipboard"],
+                input=text,
+                text=True,
+                check=True,
+            )
+    except Exception as e:
+        # 失敗してもアプリ自体は落とさず、メッセージだけ出す
+        print(f"クリップボードへのコピーに失敗しました: {e}")
 
 
 # ----------------------------------------------------------------------
@@ -246,6 +279,9 @@ def run_cli() -> None:
         if get_or_make:
             yaml_text = export_incomplete_tasks_yaml(client)
             print(yaml_text)
+
+            copy_to_clipboard(yaml_text)
+            print("\n(上記の YAML をクリップボードにコピーしました)\n")
         else:
             create_task_interactive(client)
 
