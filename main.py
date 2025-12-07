@@ -10,6 +10,9 @@ from models import (
     ExportSubtask,
     ExportTask,
     ExportData,
+    Recurrence,
+    RecurrencePattern,
+    RecurrenceRange,
 )
 
 
@@ -85,6 +88,7 @@ def get_incomplete_tasks_with_subtasks(client: Client) -> ExportData:
                 due=due,
                 note=note_value,
                 subtasks=subtasks_export,
+                recurrence=t.recurrence,
             )
         )
 
