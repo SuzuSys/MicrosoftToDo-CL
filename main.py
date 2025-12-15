@@ -2,6 +2,7 @@ import datetime
 import yaml
 import subprocess
 import sys
+from pathlib import Path
 
 from client import Client
 from formatter import parse_time_to_minutes, format_minutes
@@ -13,6 +14,9 @@ from models import (
     ExportTask,
     ExportData,
 )
+from category_state import load_state, save_state
+
+STATE_FILE = Path(__file__).parent / "category_state.json"
 
 
 def input_yn(prompt: str, default_no: bool = True) -> bool:
@@ -109,6 +113,59 @@ def get_incomplete_tasks_with_subtasks(client: Client) -> ExportData:
                     note_value = note_raw
 
         # checklistItems を取得
+        checklist_items = client.get_checklist_items(task_id)
+        subtasks_export = [
+            ExportSubtask(title=item.displayName, done=bool(item.isChecked))
+            for item in checklist_items
+        ]
+
+        export_tasks.append(
+            ExportTask(
+                title=title,
+                due=due,
+                note=note_value,
+                subtasks=subtasks_export,
+                recurrence=t.recurrence,
+            )
+        )
+
+    return ExportData(tasks=export_tasks)
+
+
+def build_export_data_from_tasks(client: Client, tasks_raw) -> ExportData:
+    """
+    TodoTask の list を受け取り、ExportData に変換する。
+    """
+    export_tasks: list[ExportTask] = []
+
+    for t in tasks_raw:
+        task_id = t.id
+        title = t.title
+
+        if t.dueDateTime and t.dueDateTime.dateTime:
+            due = t.dueDateTime.dateTime[:10]
+        else:
+            due = None
+
+        note_raw = ""
+        if t.body and t.body.content:
+            note_raw = t.body.content
+
+        note_value: Note | str | None = None
+        if note_raw.strip():
+            try:
+                parsed_yaml = yaml.safe_load(note_raw)
+            except yaml.YAMLError:
+                note_value = note_raw
+            else:
+                if isinstance(parsed_yaml, dict):
+                    try:
+                        note_value = Note.model_validate(parsed_yaml)
+                    except Exception:
+                        note_value = note_raw
+                else:
+                    note_value = note_raw
+
         checklist_items = client.get_checklist_items(task_id)
         subtasks_export = [
             ExportSubtask(title=item.displayName, done=bool(item.isChecked))
@@ -250,7 +307,11 @@ def create_task_interactive(client: Client) -> None:
         return
 
     # タスクを作成（client.py の Client を利用）
-    todo = client.create_task(title=title, due_date=due_date, note_yaml=note_yaml)
+    state = load_state(STATE_FILE)
+    current_cat = state.current_name
+    todo = client.create_task(
+        title=title, due_date=due_date, note_yaml=note_yaml, categories=[current_cat]
+    )
     task_id = todo.id
 
     print(f"タスクを作成しました: {todo.title} (id={task_id})")
@@ -277,11 +338,54 @@ def run_cli() -> None:
             default_no=False,
         )
         if get_or_make:
-            yaml_text = export_incomplete_tasks_yaml(client)
+            state = load_state(STATE_FILE)
+            current_cat = (
+                state.current_name
+            )  # 例: c3  :contentReference[oaicite:5]{index=5}
+
+            all_tasks = (
+                client.get_tasks_all()
+            )  # 完了・未完了すべて取得 :contentReference[oaicite:6]{index=6}
+
+            incomplete_tasks = [t for t in all_tasks if t.status != "completed"]
+            completed_in_current = [
+                t
+                for t in all_tasks
+                if t.status == "completed" and current_cat in (t.categories or [])
+            ]
+
+            payload = {
+                "current_category": current_cat,
+                "incomplete": build_export_data_from_tasks(
+                    client, incomplete_tasks
+                ).model_dump(mode="python"),
+                "completed_in_current": build_export_data_from_tasks(
+                    client, completed_in_current
+                ).model_dump(mode="python"),
+            }
+
+            yaml_text = yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
             print(yaml_text)
 
             copy_to_clipboard(yaml_text)
             print("\n(上記の YAML をクリップボードにコピーしました)\n")
+
+            # ---- ここからが「advance したら未完了カテゴリを +1」処理 ----
+            advance = input_yn("カテゴリナンバを進めますか？[y/N]: ", default_no=True)
+            if advance:
+                # 1) state を進める
+                state.advance()  # current_index += 1 :contentReference[oaicite:7]{index=7}
+                save_state(STATE_FILE, state)
+                new_cat = state.current_name
+
+                # 2) 未完了タスク全ての categories を new_cat に上書き
+                #    （=「未完了タスクは全て最新カテゴリに属する」）
+                for t in incomplete_tasks:
+                    client.update_task_categories(t.id, [new_cat])
+
+                print(
+                    f"カテゴリを {new_cat} に進め、未完了タスクのカテゴリを一括更新しました。"
+                )
         else:
             create_task_interactive(client)
 

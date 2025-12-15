@@ -1,6 +1,7 @@
 import cache
 import requests
 import datetime
+from typing import List, Optional
 from models import (
     TodoTask,
     TodoTaskListResponse,
@@ -30,7 +31,11 @@ class Client:
         return data["id"]
 
     def create_task(
-        self, title: str, due_date: datetime.date, note_yaml: str
+        self,
+        title: str,
+        due_date: datetime.date,
+        note_yaml: str,
+        categories: Optional[list[str]] = None,
     ) -> TodoTask:
         url = f"{self.graph_base}/me/todo/lists/{self.default_list_id}/tasks"
         due_str = due_date.strftime("%Y-%m-%dT00:00:00")
@@ -38,8 +43,13 @@ class Client:
             title=title,
             dueDateTime=DueDateTime(dateTime=due_str),
             body=TodoBody(content=note_yaml),
+            categories=categories or [],
         )
-        resp = requests.post(url, headers=self.headers, json=payload.model_dump())
+        resp = requests.post(
+            url,
+            headers=self.headers,
+            json=payload.model_dump(mode="json", exclude_none=True),
+        )
         resp.raise_for_status()
         return TodoTask.model_validate(resp.json())
 
@@ -80,3 +90,45 @@ class Client:
 
         items = ChecklistItemListResponse.model_validate(cl_resp.json())
         return items.value
+
+    def get_tasks_all(self, list_id: Optional[str] = None) -> List["TodoTask"]:
+        """
+        既定リスト（または指定リスト）の tasks をページングで全取得する。
+        完了・未完了どちらも含む。
+        """
+        if list_id is None:
+            list_id = self.default_list_id
+
+        tasks: List["TodoTask"] = []
+        url = f"{self.graph_base}/me/todo/lists/{list_id}/tasks?$top=100"
+
+        while True:
+            resp = requests.get(url, headers=self.headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+            for item in data.get("value", []):
+                tasks.append(TodoTask.model_validate(item))
+
+            next_link = data.get("@odata.nextLink")
+            if not next_link:
+                break
+            url = next_link
+
+        return tasks
+
+    # client.py（Client クラス内に追加）
+
+    def update_task_categories(self, task_id: str, categories: list[str]) -> TodoTask:
+        """
+        既存タスクの categories を上書きする（PATCH）。
+        """
+        url = (
+            f"{self.graph_base}/me/todo/lists/"
+            f"{self.default_list_id}/tasks/{task_id}"
+        )
+        body = {"categories": categories}
+
+        resp = requests.patch(url, headers=self.headers, json=body)
+        resp.raise_for_status()
+        return TodoTask.model_validate(resp.json())
