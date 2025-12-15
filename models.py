@@ -56,6 +56,7 @@ class TodoTask(BaseModel):
     dueDateTime: Optional[DueDateTime] = None
     body: Optional[TodoBody] = None
     recurrence: Optional[Recurrence] = None  # ← ここで Graph の recurrence も保持
+    categories: list[str] = []
 
 
 class TodoTaskListResponse(BaseModel):
@@ -76,6 +77,7 @@ class CreateTaskPayload(BaseModel):
     title: str
     dueDateTime: DueDateTime
     body: TodoBody
+    categories: Optional[list[str]] = None
 
 
 class QuotedStr(str):
